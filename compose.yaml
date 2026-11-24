@@ -1,7 +1,7 @@
 services:
   parking:
     build: .
-    image: parking-indicator-1-2:fresh-gpu
+    image: parking-indicator-1-2:bundled-gpu
     platform: linux/amd64
     working_dir: /workspace
     gpus: all
@@ -12,7 +12,7 @@ services:
     command: ["bash", "scripts/01_build_18.sh"]
   compare:
     build: .
-    image: parking-indicator-1-2:fresh-gpu
+    image: parking-indicator-1-2:bundled-gpu
     platform: linux/amd64
     working_dir: /workspace
     volumes:

@@ -12,3 +12,5 @@ __pycache__/
 /release_upload/
 
 /release_fresh_assets/
+
+/docker_image_assets/

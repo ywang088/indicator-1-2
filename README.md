@@ -21,11 +21,11 @@
 | 主机内存 | 建议 32 GB 以上 |
 | 磁盘 | 建议预留 50 GB 以上，保存数据、权重、镜像和结果 |
 | 容器工具 | Docker Engine、Docker Compose 插件；运行建图另需 NVIDIA Container Toolkit |
-| 网络 | 首次下载数据、权重和构建镜像时联网；准备完成后可离线运行 |
+| 网络 | 首次下载数据和镜像时联网；加载镜像后可离线运行 |
 
-镜像自动安装 Python 3.11、PyTorch 2.12.0 + CUDA 13.0、torchvision 0.27.0、SAM3 0.1.4 和 EasyOCR 1.7.2。使用 Docker 时，主机准备好驱动和容器工具即可。
+发布镜像已包含 Python 3.11、PyTorch 2.12.0 + CUDA 13.0、torchvision 0.27.0、SAM3 0.1.4、EasyOCR 1.7.2，以及 SAM3、BPE、OCR 模型文件。使用 Docker 时，主机准备好驱动和容器工具即可。
 
-只运行第二个脚本时，使用 CPU 环境并跳过 NVIDIA 工具包、模型下载和 GPU 检查步骤。
+只运行第二个脚本时，使用 CPU 环境并跳过 NVIDIA 工具包和 GPU 检查步骤。
 
 ### 1.1 安装 Docker
 
@@ -119,23 +119,20 @@ gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern 
 tar -xzf release_assets/parking-frozen-map-metadata.tar.gz
 ```
 
-### 2.3 下载模型（运行建图时需要）
+### 2.3 下载内含模型的 Docker 镜像
 
-下载 50 个模型分卷，包含 SAM3、BPE 和两份 OCR 权重：
+接手运行者下载完整镜像即可，SAM3 和 OCR 权重已包含在镜像内。
 
 ```bash
-gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern 'parking-models.tar.gz.part*' --dir release_assets
-(cd release_assets && sha256sum -c SHA256SUMS --ignore-missing)
-cat release_assets/parking-models.tar.gz.part* | tar -xzf -
+mkdir -p image_assets
+gh release download docker-bundled-v1 --repo ywang088/parking-indicator-1-2 --pattern 'parking-gpu-with-models.tar.gz.part*' --pattern SHA256SUMS --pattern image_manifest.json --dir image_assets
+(cd image_assets && sha256sum -c SHA256SUMS)
+cat image_assets/parking-gpu-with-models.tar.gz.part* | gzip -dc | docker load
 ```
 
-已有模型时，将文件放入第 3 节列出的 `data/models/` 路径。SAM3 权重 SHA256：
+成功后显示 `Loaded image: parking-indicator-1-2:bundled-gpu`。模型位于镜像的 `/opt/parking/models/`，数据挂载在 `/workspace/data/`，运行结果写入 `/workspace/results/`。
 
-```text
-9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e
-```
-
-所有压缩包均在项目根目录解压，解压后应直接出现 `data/dataset/`、`data/full_map/` 和 `data/models/`。
+所有数据压缩包在项目根目录解压，解压后应直接出现 `data/dataset/` 和 `data/full_map/`。镜像分卷通过 `docker load` 加载。
 
 ## 3. 检查文件夹结构
 
@@ -153,7 +150,7 @@ parking-indicator-1-2/               # 完整交付文件夹也可命名为 park
 │   │   ├── rgb/                   # 原始RGB图片
 │   │   ├── config.json            # 轨迹、关键帧、位姿等配置
 │   │   └── trajectories/          # T01至T18清单
-│   ├── models/                    # 建图所需模型
+│   ├── models/                    # 仅自行构建镜像时准备；发布镜像已内含
 │   │   ├── sam3.pt
 │   │   ├── bpe_simple_vocab_16e6.txt.gz
 │   │   └── ocr/
@@ -171,13 +168,15 @@ parking-indicator-1-2/               # 完整交付文件夹也可命名为 park
 └── results/                       # 运行后生成的结果
 ```
 
-## 4. 构建镜像并检查环境
+## 4. 检查镜像和运行环境
 
-两个脚本使用同一个镜像，构建一次即可：
+两个脚本使用同一个已加载镜像：
 
 ```bash
-docker compose build parking
+docker image inspect parking-indicator-1-2:bundled-gpu --format '{{.Os}}/{{.Architecture}}'
 ```
+
+预期输出 `linux/amd64`。按第 2.3 节加载发布镜像后，可直接执行下面的命令。
 
 运行建图前检查容器内 GPU：
 
@@ -300,8 +299,9 @@ docker compose run --rm compare
 |---|---|
 | GitHub 返回404或无权限 | 使用获授权账号执行 `gh auth login`，确认能访问私有仓库 |
 | 提示文件已下载 | 已有文件可直接使用；重新下载时为 `gh release download` 添加 `--clobber` |
+| 提示找不到bundled-gpu镜像 | 完成第2.3节镜像下载与加载 |
 | 提示缺少原图、配置或封存校验文件 | 检查第2节两个固定数据下载步骤和解压目录 |
-| `Model file missing` 或缺少OCR权重 | 按第3节目录放置模型文件 |
+| `Model file missing` 或缺少OCR权重 | 加载第2.3节的bundled-gpu镜像；自行构建时检查data/models目录 |
 | CUDA不可用或驱动版本不足 | 检查 `nvidia-smi`、CUDA 13.0驱动兼容性和NVIDIA Container Toolkit，再执行第4节GPU检查 |
 | Docker socket访问被拒绝 | 在Docker命令前加 `sudo`，或配置当前账号的Docker使用权限 |
 | 只得到两帧结果 | 去掉 `--smoke-frames 2`，使用第5节正式命令 |
@@ -313,14 +313,35 @@ docker compose run --rm compare
 
 ### 直接使用 Docker 命令
 
-已构建镜像时，可以执行：
+已加载镜像时，可以执行：
 
 ```bash
 # 脚本1：GPU建图
-docker run --rm --gpus all --shm-size=8g -v "$PWD/data:/workspace/data" -v "$PWD/results:/workspace/results" parking-indicator-1-2:fresh-gpu bash scripts/01_build_18.sh
+docker run --rm --gpus all --shm-size=8g -v "$PWD/data:/workspace/data" -v "$PWD/results:/workspace/results" parking-indicator-1-2:bundled-gpu bash scripts/01_build_18.sh
 
 # 脚本2：CPU比较
-docker run --rm -v "$PWD/data:/workspace/data:ro" -v "$PWD/results:/workspace/results" parking-indicator-1-2:fresh-gpu bash scripts/02_compare_full_map.sh
+docker run --rm -v "$PWD/data:/workspace/data:ro" -v "$PWD/results:/workspace/results" parking-indicator-1-2:bundled-gpu bash scripts/02_compare_full_map.sh
+```
+
+### 自行构建镜像（开发或修改代码时）
+
+先按第 3 节目录准备本地 `data/models/`。可从原模型附件获取：
+
+```bash
+gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern 'parking-models.tar.gz.part*' --dir release_assets
+(cd release_assets && sha256sum -c SHA256SUMS --ignore-missing)
+cat release_assets/parking-models.tar.gz.part* | tar -xzf -
+docker compose build parking
+```
+
+Dockerfile 会将模型复制到镜像内。首次自行构建需要联网安装依赖。
+
+如需把自行构建的镜像交给其他机器：
+
+```bash
+docker save parking-indicator-1-2:bundled-gpu | gzip > parking-gpu-with-models.tar.gz
+# 在接收机器上加载
+gzip -dc parking-gpu-with-models.tar.gz | docker load
 ```
 
 ### HPC已有Python环境
@@ -334,4 +355,4 @@ bash scripts/01_build_18.sh
 bash scripts/02_compare_full_map.sh
 ```
 
-HPC 建图需在 GPU 作业中运行；Slurm 模板位于 `code/fresh_hpc.sbatch`，按所在集群填写项目路径、环境路径、分区和账号。文件夹布局与 Docker 方式一致。
+HPC 原生环境使用本地 data/models/ 中的权重，可按上述模型下载命令准备。HPC 建图需在 GPU 作业中运行；Slurm 模板位于 `code/fresh_hpc.sbatch`，按所在集群填写项目路径、环境路径、分区和账号。文件夹布局与 Docker 方式一致。
