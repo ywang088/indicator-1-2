@@ -18,5 +18,5 @@ test -f release_assets/SHA256SUMS
 gh repo create "$repo" --private --source . --remote origin --push
 visibility="$(gh repo view "$repo" --json visibility --jq .visibility)"
 test "$visibility" = PRIVATE
-gh release create sealed-18-v1 --repo "$repo" --title '固定18条轨迹 Docker交付' --notes '代码、固定数据和容器实跑结果。解包说明见README。' release_assets/parking-data.tar.gz.part* release_assets/parking-results.tar.gz release_assets/SHA256SUMS release_assets/release_manifest.json
+gh release create sealed-18-v1 --repo "$repo" --title '固定18条轨迹 Docker交付' --notes '代码、固定数据和容器实跑结果。解包说明见README。' release_assets/parking-data.tar.gz.part* release_assets/parking-results.tar.gz release_assets/parking-docker-code.zip release_assets/SHA256SUMS release_assets/release_manifest.json
 printf 'Private repository: https://github.com/%s\n' "$repo"

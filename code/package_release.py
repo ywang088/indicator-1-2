@@ -1,5 +1,5 @@
 """Create private-release data parts without adding large datasets to Git history."""
-import gzip,hashlib,json,tarfile
+import gzip,hashlib,json,tarfile,subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 class Parts:
@@ -29,6 +29,7 @@ def main():
   with tarfile.open(fileobj=gz,mode='w|') as tar:tar.add(ROOT/'data',arcname='data')
  parts.close()
  with tarfile.open(out/'parking-results.tar.gz','w:gz',compresslevel=1) as tar:tar.add(ROOT/'results',arcname='results')
- paths=parts.paths+[out/'parking-results.tar.gz'];manifest=[dict(file=p.name,bytes=p.stat().st_size,sha256=digest(p)) for p in paths]
+ subprocess.run(['git','archive','--format=zip','--prefix=parking_docker/','--output='+str(out/'parking-docker-code.zip'),'HEAD'],cwd=ROOT,check=True)
+ paths=parts.paths+[out/'parking-results.tar.gz',out/'parking-docker-code.zip'];manifest=[dict(file=p.name,bytes=p.stat().st_size,sha256=digest(p)) for p in paths]
  (out/'SHA256SUMS').write_text(''.join(f"{x['sha256']}  {x['file']}\n" for x in manifest));(out/'release_manifest.json').write_text(json.dumps(manifest,indent=2));print(json.dumps(manifest,indent=2))
 if __name__=='__main__':main()
