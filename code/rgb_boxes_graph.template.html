@@ -1,0 +1,93 @@
+<div id="__ROOT_ID__">
+<style>
+#__ROOT_ID__ [hidden] {display:none!important}
+#__ROOT_ID__ {display:grid;gap:calc(var(--font-size-base)*.65)}
+#__ROOT_ID__ .pair {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#__ROOT_ID__ figure {margin:0;min-width:0}
+#__ROOT_ID__ .rgb,#__ROOT_ID__ .boxes {width:100%;aspect-ratio:16/9;display:block}
+#__ROOT_ID__ .graph {width:100%;height:310px;display:block}
+#__ROOT_ID__ .layers {display:grid;grid-template-columns:repeat(4,1fr);text-align:center}
+#__ROOT_ID__ .local-scroll {max-height:720px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:16px}
+#__ROOT_ID__ .local-graph {position:relative;min-height:220px}
+#__ROOT_ID__ .local-top {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-bottom:48px}
+#__ROOT_ID__ .object-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:22px 26px}
+#__ROOT_ID__ .local-node {position:relative;z-index:1;background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:6px;padding:10px;text-align:left;min-width:0;overflow-wrap:anywhere}
+#__ROOT_ID__ .object-node {width:100%;cursor:pointer;display:grid;gap:4px;font:inherit}
+#__ROOT_ID__ .object-node[aria-pressed="true"] {border:2px solid var(--viz-series-3);background:var(--background)}
+#__ROOT_ID__ .node-title {font-weight:500}
+#__ROOT_ID__ .node-sub {font-size:12px;opacity:.8;white-space:pre-line}
+#__ROOT_ID__ .local-group {display:grid;align-content:start;gap:8px;position:relative;z-index:1}
+#__ROOT_ID__ .local-edges {position:absolute;inset:0;pointer-events:none;width:100%;height:100%;z-index:0}
+#__ROOT_ID__ [data-detail] {overflow-wrap:anywhere}
+@media(max-width:580px){#__ROOT_ID__ .local-top {grid-template-columns:1fr;gap:12px}#__ROOT_ID__ .object-grid {grid-template-columns:1fr}#__ROOT_ID__ .pair {grid-template-columns:1fr}}
+</style>
+<h2>__TITLE__</h2>
+<div class="viz-controls"><label class="form-label">轨迹<select class="form-select" data-track></select></label><button type="button" class="btn btn-primary" data-play>播放</button><button type="button" class="btn" data-prev>上一帧</button><button type="button" class="btn" data-next>下一帧</button></div>
+<div data-status class="tabular-nums" aria-live="polite"></div>
+<label class="form-label">关键帧<input type="range" class="form-range" min="0" value="0" step="1" data-step aria-label="切换关键帧"></label>
+<div class="pair"><figure><figcaption>原始 RGB</figcaption><canvas class="rgb" role="img" aria-label="当前关键帧原始图像"></canvas></figure><figure><figcaption>识别框 · 清理后的 SAM3 结果</figcaption><canvas class="boxes" role="img" aria-label="同帧检测框，可点击框选择物体"></canvas></figure></div>
+<label class="form-label">目标框与 graph 联动<select class="form-select" data-object aria-label="选择当前帧目标"></select></label>
+<div data-detail class="text-small" aria-live="polite"></div>
+<div class="viz-controls"><label class="form-label">Graph 显示范围<select class="form-select" data-graph-mode><option value="local">当前帧相关节点（默认）</option><option value="full">完整 graph（截至当前帧）</option></select></label></div>
+<div data-graph-summary class="text-small" aria-live="polite"></div>
+<div class="local-scroll"><div class="local-graph"></div></div>
+<div class="layers"><span data-region></span><span data-portal></span><span data-objects></span><span data-frames></span></div>
+<canvas class="graph" role="img" aria-label="截至当前帧的区域、门户、物体和观测帧图；突出当前帧目标"></canvas>
+<div class="text-small">实线：观测／柱标／连接证据；点击有名称的物体节点与 RGB 检测框联动。区域未确认的物体不强行分区。</div>
+<div class="text-small">默认仅显示当前帧目标及其相关区域、门户。完整模式包含截至当前帧的全部已出现节点；两种模式均不绘制距离推测的区域归属。</div>
+<script type="application/json" data-payload>__PAYLOAD__</script>
+<script>
+(()=>{
+const root=document.getElementById('__ROOT_ID__'),D=JSON.parse(root.querySelector('[data-payload]').textContent),track=root.querySelector('[data-track]'),slider=root.querySelector('[data-step]'),obj=root.querySelector('[data-object]'),play=root.querySelector('[data-play]'),rgb=root.querySelector('.rgb'),boxes=root.querySelector('.boxes'),graph=root.querySelector('.graph');let ti=0,si=0,selected=-1,timer=null,activeImage=null,imageToken=0,graphMode='local',localVersion=0;
+const words={column:'柱子',vehicle:'车辆',door:'门',parking_space:'车位候选',direction_sign:'方向标识',exit_sign:'出口标识',fire_equipment:'消防设施',traffic_cone:'锥桶',person:'行人'};
+D.tracks.forEach((t,i)=>{const o=document.createElement('option');o.value=i;o.textContent=t.id+' · '+t.frames.length+' 帧 · '+t.frames[t.frames.length-1].seconds.toFixed(1)+' 秒';track.append(o)});
+const color=token=>{const e=document.createElement('span');e.style.color='var('+token+')';root.append(e);const v=getComputedStyle(e).color;e.remove();return v};
+function setup(c,h){const w=c.clientWidth,dpr=window.devicePixelRatio||1;c.width=Math.round(w*dpr);c.height=Math.round(h*dpr);const x=c.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);x.font=getComputedStyle(root).font;return [x,w,h]}
+function drawImages(){const f=D.tracks[ti].frames[si];for(const c of [rgb,boxes]){const [x,w,h]=setup(c,c.clientWidth*9/16);if(!activeImage)continue;x.drawImage(activeImage,0,0,w,h);if(c===rgb)continue;const ink=color('--viz-series-1'),highlight=color('--viz-series-3'),bg=color('--background'),fg=color('--foreground');f.boxes.forEach((b,i)=>{const chosen=selected===b[0],sx=w/1280,sy=h/720;x.strokeStyle=chosen?highlight:ink;x.lineWidth=chosen?3:1;x.globalAlpha=selected<0||chosen?1:.2;x.strokeRect(b[3]*sx,b[4]*sy,(b[5]-b[3])*sx,(b[6]-b[4])*sy);if(selected>=0&&!chosen)return;const label=String(i+1)+(chosen?' '+(words[D.labels[b[1]]]||D.labels[b[1]])+' '+b[2].toFixed(2):'');const tw=x.measureText(label).width,xx=Math.min(Math.max(0,b[3]*sx),Math.max(0,w-tw-6)),yy=Math.max(15,Math.min(h-3,b[4]*sy));x.fillStyle=bg;x.fillRect(xx,yy-14,tw+5,16);x.fillStyle=fg;x.fillText(label,xx+2,yy-2)});x.globalAlpha=1}}
+function drawFullGraph(){const t=D.tracks[ti],f=t.frames[si],[x,w,h]=setup(graph,310),fg=color('--foreground'),muted=color('--border'),series=[1,2,3,4].map(i=>color('--viz-series-'+i)),pos=new Map(),edges=[];const regs=f.regions,portals=f.portals;function layout(ids,k){const cols=k===2?Math.max(4,Math.floor(w*.19/7)):1,rows=Math.ceil(ids.length/cols);ids.forEach((id,j)=>pos.set(id,[(k+.5)*w/4+(j%cols-(cols-1)/2)*7,rows<=1?h/2:25+Math.floor(j/cols)*(h-50)/(rows-1),k]))}
+layout(regs.map(r=>'r'+r[0]),0);layout(portals.map((p,i)=>'p'+i),1);layout(Array.from({length:f.count},(_,i)=>'o'+i),2);layout(Array.from({length:si+1},(_,i)=>'f'+i),3);
+for(let k=0;k<=si;k++)t.frames[k].boxes.forEach(b=>edges.push(['f'+k,'o'+b[0],k===si]));regs.forEach(r=>r[1].forEach(o=>edges.push(['r'+r[0],'o'+o,false])));portals.forEach((p,i)=>{p[0].forEach(r=>edges.push(['r'+r,'p'+i,true]));p[1].forEach(o=>edges.push(['p'+i,'o'+o,true]));p[2].forEach(k=>edges.push(['f'+k,'p'+i,true]))});
+x.lineWidth=.65;edges.forEach(e=>{const a=pos.get(e[0]),b=pos.get(e[1]);if(!a||!b)return;const hot=selected>=0?(e[0]==='o'+selected||e[1]==='o'+selected):e[2];x.strokeStyle=hot?series[2]:muted;x.globalAlpha=hot?.65:.18;x.beginPath();x.moveTo(a[0],a[1]);x.lineTo(b[0],b[1]);x.stroke()});x.globalAlpha=1;
+const current=new Set(f.boxes.map(b=>'o'+b[0]));pos.forEach((p,id)=>{const hot=id==='o'+selected||id==='f'+si||selected<0&&current.has(id);x.globalAlpha=p[2]<2||hot?1:.35;x.fillStyle=series[p[2]];x.beginPath();x.arc(p[0],p[1],p[2]<2?6:hot?3.4:1.7,0,Math.PI*2);x.fill()});x.globalAlpha=1;x.fillStyle=fg;x.textAlign='center';regs.forEach(r=>{const p=pos.get('r'+r[0]);x.fillText(r[0]+' 区',p[0],p[1]+22)});portals.forEach((p,i)=>{const a=pos.get('p'+i);x.fillText(p[0].join('↔'),a[0],a[1]+22)});if(!regs.length)x.fillText('尚未形成',w/8,h/2);if(!portals.length)x.fillText('尚未形成',w*3/8,h/2);
+root.querySelector('[data-region]').textContent='区域 '+regs.length;root.querySelector('[data-portal]').textContent='门户 '+portals.length;root.querySelector('[data-objects]').textContent='物体 '+f.count;root.querySelector('[data-frames]').textContent='观测帧 '+(si+1)}
+const modeSelect=root.querySelector('[data-graph-mode]'),localGraph=root.querySelector('.local-graph');
+modeSelect.onchange=()=>{graphMode=modeSelect.value;drawGraph();save()};
+function drawGraph(){
+ const local=graphMode==='local';graph.hidden=local;root.querySelector('.layers').hidden=local;root.querySelector('.local-scroll').hidden=!local;
+ if(!local){localVersion++;drawFullGraph();root.querySelector('[data-graph-summary]').textContent='完整 graph：截至当前帧的全部节点与已记录连接；当前目标高亮。';return}
+ drawLocalGraph();
+}
+function drawLocalGraph(){
+ const version=++localVersion,t=D.tracks[ti],f=t.frames[si],current=new Set(f.boxes.map(b=>b[0]));
+ const portals=f.portals.map((p,i)=>({p,i})).filter(({p})=>p[2].includes(si)||p[1].some(id=>current.has(id)));
+ const relatedZones=new Set(portals.flatMap(({p})=>p[0]));const regions=f.regions.filter(r=>r[1].some(id=>current.has(id))||relatedZones.has(r[0]));
+ root.querySelector('[data-graph-summary]').textContent='当前帧局部图：'+f.boxes.length+' 个物体 · '+regions.length+' 个相关区域 · '+portals.length+' 个相关门户 · 1 个观测帧';
+ localGraph.replaceChildren();const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.classList.add('local-edges');svg.setAttribute('aria-hidden','true');localGraph.append(svg);
+ const top=document.createElement('div');top.className='local-top';localGraph.append(top);const nodes=new Map(),edges=[];
+ function group(title){const g=document.createElement('div');g.className='local-group';const h=document.createElement('div');h.className='node-title';h.textContent=title;g.append(h);top.append(g);return g}
+ function node(parent,id,title,sub,button=false){const e=document.createElement(button?'button':'div');e.className='local-node'+(button?' object-node':'');e.dataset.node=id;if(button)e.type='button';const name=document.createElement('span');name.className='node-title';name.textContent=title;const detail=document.createElement('span');detail.className='node-sub';detail.textContent=sub;if(button)e.append(name,detail);else e.append(name,document.createElement('br'),detail);parent.append(e);nodes.set(id,e);return e}
+ const rg=group('相关区域');regions.forEach(r=>node(rg,'r'+r[0],r[0]+' 区',r[3]==='awaiting_letter'?'柱色临时区域 · 等待读取字母':r[3]==='conflict'?'颜色与字母冲突 · 暂停绑定':r[3]==='bound'?({red:'红色',yellow:'黄色',blue:'蓝色',green:'绿色',purple:'紫色'}[r[4]]||r[4])+' → '+r[0]+' · 字母已绑定':'柱子标识证据；非精确边界'));if(!regions.length){const e=document.createElement('span');e.textContent='当前帧没有相关区域证据';rg.append(e)}
+ const pg=group('相关门户');portals.forEach(({p,i})=>node(pg,'p'+i,p[0].join(' ↔ ')+' 共享通道',p[3]==='color_supported_connection_candidate'?'颜色分区连接候选 · 字母待确认':'连接候选 · 非实体门要求'));if(!portals.length){const e=document.createElement('span');e.textContent='当前帧无相关门户';pg.append(e)}
+ const fg=group('当前观测');node(fg,'frame','观测帧 '+f.fid,t.id+' · '+f.boxes.length+' 个目标');
+ const list=document.createElement('div');list.className='object-grid';localGraph.append(list);
+ f.boxes.forEach((b,j)=>{const zones=f.regions.filter(r=>r[1].includes(b[0])).map(r=>r[0]),links=portals.filter(({p})=>p[1].includes(b[0])).map(({p})=>p[0].join('↔'));
+  const name=(j+1)+' · '+(words[D.labels[b[1]]]||D.labels[b[1]])+(b[7]?' ['+b[7]+']':'');const sub=(zones.length?f.regions.filter(r=>r[1].includes(b[0])).map(r=>r[0]+' 区 · '+(r[3]==='awaiting_letter'?'颜色暂分':r[3]==='conflict'?'绑定待核对':r[3]==='bound'?(b[7].split(',').includes(r[0])?'柱标确认':'颜色关联'):'柱标支持')).join('、'):'区域未确认')+(links.length?' · 支撑 '+links.join('、')+' 门户':'')+' · '+b[2].toFixed(2)+'\n'+t.ids[b[0]];
+  const e=node(list,'o'+b[0],name,sub,true);e.setAttribute('aria-pressed',String(selected===b[0]));e.onclick=()=>{selected=b[0];obj.value=selected;detail();save()};edges.push(['frame','o'+b[0],'观测']);zones.forEach(z=>edges.push(['r'+z,'o'+b[0],'柱标']));
+ });
+ portals.forEach(({p,i})=>{p[0].forEach(z=>edges.push(['r'+z,'p'+i,'连接']));p[1].filter(id=>current.has(id)).forEach(id=>edges.push(['p'+i,'o'+id,'支撑']));if(p[2].includes(si))edges.push(['frame','p'+i,'支持连接'])});
+ (()=>{if(version!==localVersion||graphMode!=='local')return;const box=localGraph.getBoundingClientRect();svg.setAttribute('viewBox','0 0 '+box.width+' '+box.height);
+  edges.forEach(([a,b,kind])=>{if(!nodes.has(a)||!nodes.has(b))return;const aa=nodes.get(a).getBoundingClientRect(),bb=nodes.get(b).getBoundingClientRect(),x1=aa.left+aa.width/2-box.left,y1=aa.top+aa.height/2-box.top,x2=bb.left+bb.width/2-box.left,y2=bb.top+bb.height/2-box.top,path=document.createElementNS(ns,'path');path.setAttribute('d',`M ${x1} ${y1} C ${x1} ${(y1+y2)/2}, ${x2} ${(y1+y2)/2}, ${x2} ${y2}`);path.setAttribute('fill','none');const hot=a==='o'+selected||b==='o'+selected;path.setAttribute('stroke',color(hot?'--viz-series-3':'--foreground'));path.setAttribute('stroke-opacity',hot?'.85':'.12');path.setAttribute('stroke-width',hot?'2':'1');const title=document.createElementNS(ns,'title');title.textContent=kind;path.append(title);svg.append(path)})
+ })();
+}
+
+function save(){if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{trajectory:D.tracks[ti].id,frame:D.tracks[ti].frames[si].fid,object:selected<0?null:D.tracks[ti].ids[selected]},privateContent:{viewId:root.id,ti,si,selected,graphMode}}).catch(()=>{})}
+function detail(){const t=D.tracks[ti],f=t.frames[si],b=f.boxes.find(b=>b[0]===selected);root.querySelector('[data-detail]').textContent=b?'object:'+t.ids[b[0]]+' · '+(words[D.labels[b[1]]]||D.labels[b[1]])+' · 检测分数 '+b[2].toFixed(3)+(b[7]?' · 柱标文字 '+b[7]:''):'当前帧 '+f.boxes.length+' 个检测框；选中框可查看对应物体节点。';drawImages();drawGraph()}
+function render(persist=false){const t=D.tracks[ti],f=t.frames[si];track.value=ti;slider.max=t.frames.length-1;slider.value=si;root.querySelector('[data-status]').textContent=t.id+' · '+f.fid+' · '+(si+1)+' / '+t.frames.length+' · 采集时间 +'+f.seconds.toFixed(1)+' s';obj.replaceChildren();const all=document.createElement('option');all.value=-1;all.textContent='全部检测框';obj.append(all);f.boxes.forEach((b,i)=>{const o=document.createElement('option');o.value=b[0];o.textContent=(i+1)+' · '+(words[D.labels[b[1]]]||D.labels[b[1]])+' '+b[2].toFixed(2)+' · '+t.ids[b[0]];obj.append(o)});if(!f.boxes.some(b=>b[0]===selected))selected=-1;obj.value=selected;const token=++imageToken;activeImage=null;detail();const im=new Image();im.onload=()=>{if(token!==imageToken)return;activeImage=im;drawImages()};im.onerror=()=>{if(token===imageToken)root.querySelector('[data-detail]').textContent='图像加载失败：'+f.fid};im.src=D.images[f.fid];if(persist)save()}
+function stop(){clearInterval(timer);timer=null;play.textContent='播放'}
+track.onchange=()=>{stop();ti=Number(track.value);si=0;selected=-1;render(true)};slider.oninput=()=>{stop();si=Number(slider.value);selected=-1;render(true)};root.querySelector('[data-prev]').onclick=()=>{stop();si=Math.max(0,si-1);selected=-1;render(true)};root.querySelector('[data-next]').onclick=()=>{stop();si=Math.min(D.tracks[ti].frames.length-1,si+1);selected=-1;render(true)};obj.onchange=()=>{selected=Number(obj.value);detail();save()};play.onclick=()=>{if(timer){stop();return}if(si===D.tracks[ti].frames.length-1){si=0;selected=-1;render(true)}play.textContent='暂停';timer=setInterval(()=>{if(si>=D.tracks[ti].frames.length-1){stop();return}si++;selected=-1;render(true)},1000)};
+boxes.onclick=e=>{const b=boxes.getBoundingClientRect(),u=(e.clientX-b.left)/b.width*1280,v=(e.clientY-b.top)/b.height*720,eligible=D.tracks[ti].frames[si].boxes.filter(d=>u>=d[3]&&u<=d[5]&&v>=d[4]&&v<=d[6]);eligible.sort((a,b)=>(a[5]-a[3])*(a[6]-a[4])-(b[5]-b[3])*(b[6]-b[4]));if(eligible.length){selected=eligible[0][0];obj.value=selected;detail();save()}};
+function restore(s){if(s?.viewId!==root.id)s=null;stop();graphMode=s?.graphMode==='full'?'full':'local';root.querySelector('[data-graph-mode]').value=graphMode;ti=Number.isInteger(s?.ti)&&s.ti>=0&&s.ti<D.tracks.length?s.ti:(D.initialTrack||0);si=Number.isInteger(s?.si)?Math.max(0,Math.min(s.si,D.tracks[ti].frames.length-1)):0;selected=Number.isInteger(s?.selected)?s.selected:-1;render()}
+new ResizeObserver(()=>{drawImages();drawGraph()}).observe(root.querySelector('.pair'));new MutationObserver(()=>{drawImages();drawGraph()}).observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme']});window.addEventListener('openai:set_globals',e=>restore(e.detail?.globals?.widgetState?.privateContent));restore(window.openai?.widgetState?.privateContent);
+})();
+</script>
+</div>

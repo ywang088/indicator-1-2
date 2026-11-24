@@ -1,0 +1,9 @@
+services:
+  parking:
+    build: .
+    image: parking-indicator-1-2:replay
+    working_dir: /workspace
+    volumes:
+      - ./data:/workspace/data
+      - ./results:/workspace/results
+    command: ["bash", "scripts/01_build_18.sh"]

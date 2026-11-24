@@ -1,0 +1,47 @@
+<div id="parking-full-20261124">
+<style>
+#parking-full-20261124 {display:grid;gap:calc(var(--font-size-base)*.7)}
+#parking-full-20261124 canvas {width:100%;height:530px;display:block}
+#parking-full-20261124 .layers {display:grid;grid-template-columns:repeat(4,1fr);text-align:center;gap:8px}
+#parking-full-20261124 figure {margin:0}
+#parking-full-20261124 img {display:block;width:100%;height:auto}
+#parking-full-20261124 .photos {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#parking-full-20261124 .details {overflow-wrap:anywhere}
+@media(max-width:520px){#parking-full-20261124 .photos {grid-template-columns:1fr}}
+</style>
+<h2>停车场 · 完整四层 graph</h2>
+<div class="text-small" data-count></div>
+<div class="layers"><span>区域 · 2</span><span>门户 · 1</span><span>物体 · 7,877</span><span>观测帧 · 267</span></div>
+<canvas role="img" aria-label="全部区域、门户、物体和观测帧的连接图；可在下方选择任意节点查看连接"></canvas>
+<label class="form-label">选中节点<select class="form-select" aria-label="选中节点"></select></label>
+<div class="details text-small" aria-live="polite" data-detail></div>
+<div class="text-small">实线：连接或观测证据　虚线：区域归属候选　物体列为紧凑排列，不代表空间坐标</div>
+<div class="photos"><figure><img data-photo="0" alt="004305：左侧 F 区柱子与右侧黄色柱列之间的共享通道"><figcaption>004305 · 左侧 F 区，右侧黄色柱列</figcaption></figure><figure><img data-photo="1" alt="004345：同一通道右侧 E 区柱子"><figcaption>004345 · 同一通道右侧 E 标识</figcaption></figure></div>
+<script type="application/json" data-graph>__GRAPH_DATA__</script>
+<script>
+(()=>{
+ const root=document.getElementById('parking-full-20261124'),D=JSON.parse(root.querySelector('[data-graph]').textContent),canvas=root.querySelector('canvas'),ctx=canvas.getContext('2d'),select=root.querySelector('select');
+ const names=['区域','门户','物体','观测帧'],translate={column:'柱子',vehicle:'车辆',door:'门物体',parking_space:'车位',direction_sign:'方向标识',exit_sign:'出口标识',fire_equipment:'消防设施',traffic_cone:'锥桶'};
+ const groups=[[],[],[],[]],adj=D.nodes.map(()=>[]);D.nodes.forEach((n,i)=>groups[n[1]].push(i));D.edges.forEach((e,i)=>{adj[e[0]].push(i);adj[e[1]].push(i)});
+ const fragment=document.createDocumentFragment();const all=document.createElement('option');all.value='-1';all.textContent='全部节点与连接';fragment.append(all);
+ groups.forEach((g,k)=>{const og=document.createElement('optgroup');og.label=names[k];g.forEach(i=>{const o=document.createElement('option');o.value=i;o.textContent=(translate[D.nodes[i][2]]||D.nodes[i][2]||names[k])+' · '+D.nodes[i][0];og.append(o)});fragment.append(og)});select.append(fragment);
+ root.querySelector('[data-count]').textContent=D.nodes.length.toLocaleString()+' 个节点 · '+D.edges.length.toLocaleString()+' 条边 · 全量展示';
+ D.photos.forEach((src,i)=>root.querySelector('[data-photo="'+i+'"]').src=src);
+ let selected=-1,points=[];
+ const color=(token)=>{const el=document.createElement('span');el.style.color='var('+token+')';root.append(el);const c=getComputedStyle(el).color;el.remove();return c};
+ function draw(){const w=canvas.clientWidth,h=530,dpr=window.devicePixelRatio||1;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);const neutral=color('--foreground'),colors=[1,2,3,4].map(i=>color('--viz-series-'+i));points=[];
+ groups.forEach((g,k)=>{const cols=k===2?Math.max(12,Math.floor(w*.20/2.6)):k===3?7:1,rows=Math.ceil(g.length/cols);g.forEach((idx,j)=>{points[idx]=[(k+.5)*w/4+(cols===1?0:(j%cols-(cols-1)/2)*Math.min(6,w*.20/cols)),rows===1?h/2:22+Math.floor(j/cols)*(h-44)/(rows-1)]})});
+ const activeEdges=new Set(selected<0?[]:adj[selected]),activeNodes=new Set(selected<0?[]:[selected]);activeEdges.forEach(e=>{activeNodes.add(D.edges[e][0]);activeNodes.add(D.edges[e][1])});
+ ctx.strokeStyle=neutral;ctx.lineWidth=.4;ctx.globalAlpha=selected<0?.025:.012;ctx.beginPath();D.edges.forEach(e=>{const a=points[e[0]],b=points[e[1]];ctx.moveTo(...a);ctx.lineTo(...b)});ctx.stroke();ctx.globalAlpha=1;
+ groups.forEach((g,k)=>{ctx.fillStyle=colors[k];ctx.globalAlpha=selected<0?.8:.23;g.forEach(i=>{const p=points[i],r=k<2?7:k===2?1.2:2;ctx.beginPath();ctx.arc(p[0],p[1],r,0,Math.PI*2);ctx.fill()})});
+ ctx.globalAlpha=.7;ctx.lineWidth=1;ctx.strokeStyle=colors[selected>=0?D.nodes[selected][1]:1];activeEdges.forEach(i=>{const e=D.edges[i],a=points[e[0]],b=points[e[1]];ctx.setLineDash(e[2]===D.kinds.indexOf('candidate_contains')?[3,4]:[]);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke()});ctx.setLineDash([]);ctx.globalAlpha=1;
+ ctx.globalAlpha=1;ctx.fillStyle=neutral;ctx.font=getComputedStyle(root).font;ctx.textAlign='center';groups[0].forEach(i=>ctx.fillText(D.nodes[i][0].split(':').pop()+' 区',points[i][0],points[i][1]+21));groups[1].forEach(i=>ctx.fillText('E ↔ F 共享通道',points[i][0],points[i][1]+24));
+ activeNodes.forEach(i=>{const p=points[i];ctx.fillStyle=colors[D.nodes[i][1]];ctx.beginPath();ctx.arc(...p,D.nodes[i][1]<2?8:3,0,Math.PI*2);ctx.fill()});
+ }
+ function choose(i,save){selected=Number.isInteger(i)&&i>=-1&&i<D.nodes.length?i:-1;select.value=String(selected);const d=root.querySelector('[data-detail]');d.textContent=selected<0?'全图：门物体与区域连接分开记录；共享通道连接 E、F 两区。':D.nodes[selected][0]+' · '+(translate[D.nodes[selected][2]]||D.nodes[selected][2]||names[D.nodes[selected][1]])+' · '+adj[selected].length+' 条直接关联'+(D.nodes[selected][1]===1?' · 两侧柱子与连续通道经助手目视复核，尚非人工验收。':'');draw();if(save&&window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{selected_node:selected<0?null:D.nodes[selected][0]},privateContent:{selected}}).catch(()=>{})}
+ select.addEventListener('change',()=>choose(Number(select.value),true));canvas.addEventListener('click',e=>{const b=canvas.getBoundingClientRect(),x=e.clientX-b.left,y=e.clientY-b.top;let best=-1,dist=144;points.forEach((p,i)=>{const v=(p[0]-x)**2+(p[1]-y)**2;if(v<dist){dist=v;best=i}});if(best>=0)choose(best,true)});
+ new ResizeObserver(draw).observe(canvas);new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['class','style','data-theme']});
+ window.addEventListener('openai:set_globals',e=>{const s=e.detail?.globals?.widgetState?.privateContent;if(s)choose(s.selected,false)});choose(window.openai?.widgetState?.privateContent?.selected??-1,false);
+})();
+</script>
+</div>

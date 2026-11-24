@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.venv/
+/release_assets/
+/data/**
+!/data/README.md
+/results/**
+!/results/README.md
