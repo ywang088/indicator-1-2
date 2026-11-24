@@ -1,16 +1,16 @@
 """Download public release files with SHA256 verification; no GitHub login."""
-import argparse,fnmatch,hashlib,json,time,urllib.request
+import argparse,fnmatch,hashlib,json,time,urllib.request,urllib.parse
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 REPO='ywang088/indicator-1-2'
-API='https://api.github.com/repos/'+REPO
+RELEASES='https://github.com/'+REPO+'/releases/download/'
 
 def open_url(url):
- return urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'indicator-1-2-downloader','Accept':'application/vnd.github+json'}),timeout=120)
-def read_json(url):
+ return urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'indicator-1-2-downloader','Accept':'*/*'}),timeout=120)
+def read_bytes(url):
  for attempt in range(4):
   try:
-   with open_url(url) as f:return json.load(f)
+   with open_url(url) as f:return f.read()
   except Exception:
    if attempt==3:raise
    time.sleep(2**attempt)
@@ -20,11 +20,16 @@ def sha(path):
   for b in iter(lambda:f.read(4*1024*1024),b''):h.update(b)
  return h.hexdigest()
 def get_assets(tag):
- release=read_json(API+'/releases/tags/'+tag);assets=[];page=1
- while True:
-  chunk=read_json(API+f"/releases/{release['id']}/assets?per_page=100&page={page}");assets.extend(chunk)
-  if len(chunk)<100:return assets
-  page+=1
+ base=RELEASES+urllib.parse.quote(tag,safe='')+'/'
+ raw=read_bytes(base+'release_manifest.json');rows=json.loads(raw);assets=[]
+ def asset(name,size,digest):
+  if Path(name).name!=name:raise ValueError('Invalid release filename')
+  return dict(name=name,size=size,digest='sha256:'+digest,browser_download_url=base+urllib.parse.quote(name,safe=''))
+ for row in rows:assets.append(asset(row['file'],row['bytes'],row['sha256']))
+ sums=''.join(f"{row['sha256']}  {row['file']}\n" for row in rows).encode()
+ assets.append(asset('SHA256SUMS',len(sums),hashlib.sha256(sums).hexdigest()))
+ assets.append(asset('release_manifest.json',len(raw),hashlib.sha256(raw).hexdigest()))
+ return assets
 
 def download(asset,destination):
  digest=asset.get('digest','')
