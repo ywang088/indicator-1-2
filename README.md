@@ -1,112 +1,46 @@
-# 停车场指标1.2 完整推理与建图
+# 停车场指标 1.2 运行指南
 
-第一个入口从原始 RGB 运行 SAM3 和 OCR，构建固定 18 条轨迹的认知图。第二个入口独立读取 data/full_map 中预存的封存全场景图与同范围点云，执行存储比较和范围检查。
+本项目提供两个独立脚本：
 
-## 1. 实际计算流程
+| 任务 | 脚本 | 输入 | 输出 | 计算设备 |
+|---|---|---|---|---|
+| 18 条轨迹建图 | `scripts/01_build_18.sh` | RGB、轨迹清单、同步几何、SAM3/OCR 权重 | 每条轨迹的图、检测框图片、更新与查询日志、本轮合并图 | NVIDIA GPU |
+| 全场景图存储比较 | `scripts/02_compare_full_map.sh` | 已保存的全场景图和对应点云 | 存储对比表、范围对照图、检查结果 | CPU |
 
-1. 校验固定6,723张RGB的SHA256，按封存清单选择370个关键帧。
-2. 对370帧逐帧调用SAM3，按固定提示词检测、分割并按类别去重。
-3. 本次运行EasyOCR：整帧识别和柱子裁剪放大识别，重新读取字母。
-4. 使用同帧LiDAR几何、固定标定及相机位姿，重新计算物体三维位置，清理车辆门等候选误检。
-5. 根据本次SAM3柱子掩膜提取颜色，再用当前及历史字母观测绑定区域；按通道两侧柱子建立候选连接。
-6. 每条轨迹从空图开始按时间顺序增量建图，输出帧、物体、门户、区域四层关系；本轮合并图另存 results/online_full_map。
-7. 保存本次检测框图、ID对应表、输入/更新/查询日志和执行证据。
+两个脚本可以单独执行。建图结果保存在 `results/`，存储比较使用 `data/full_map/` 中预存的封存图。
 
-在线建图使用封存 RGB 序列：完成 370 个关键帧的识别后，按时间顺序增量更新图。其余原始帧按固定采样策略记录跳帧。三维定位使用固定的 LiDAR XYZ、相机标定和位姿。
+## 1. 准备运行环境
 
-## 2. 硬件及环境
+推荐在 Linux x86_64 服务器上使用 Docker。以下安装命令以 Ubuntu 为例，所有项目命令均在包含 `compose.yaml` 的项目根目录执行。
 
-- Linux x86_64 + NVIDIA CUDA显卡。默认Docker使用Python 3.11、PyTorch 2.12.0 + CUDA 13.0、torchvision 0.27.0、SAM3 0.1.4。
-- 主机驱动支持 CUDA 13.0，安装 NVIDIA Container Toolkit。
-- 实跑配置：H100 80GB；全量作业 877727 成功完成，用时 26 分 21 秒。
-- RTX 4090 部署需使用兼容 CUDA 13.0 的驱动；当前服务器的 535 驱动需要升级。
-- 建议 CPU 4 核以上、内存 32 GB 以上、磁盘可用空间 50 GB 以上。
-- Mac 可用于查看结果、代码开发和第二个入口的 CPU 比较。
+| 项目 | 配置 |
+|---|---|
+| 建图显卡 | 建议 RTX 4090 24 GB 或 H100；参考运行使用 H100 80 GB |
+| 显卡驱动 | 支持 CUDA 13.0 的 NVIDIA 驱动 |
+| CPU | 建议 4 核以上 |
+| 主机内存 | 建议 32 GB 以上 |
+| 磁盘 | 建议预留 50 GB 以上，保存数据、权重、镜像和结果 |
+| 容器工具 | Docker Engine、Docker Compose 插件；运行建图另需 NVIDIA Container Toolkit |
+| 网络 | 首次下载数据、权重和构建镜像时联网；准备完成后可离线运行 |
 
-主要依赖见 `code/requirements-gpu.txt`，SAM3 安装包位于 `code/vendor/`。
+镜像自动安装 Python 3.11、PyTorch 2.12.0 + CUDA 13.0、torchvision 0.27.0、SAM3 0.1.4 和 EasyOCR 1.7.2。使用 Docker 时，主机准备好驱动和容器工具即可。
 
-## 3. 文件夹结构
+只运行第二个脚本时，使用 CPU 环境并跳过 NVIDIA 工具包、模型下载和 GPU 检查步骤。
 
-```text
-parking_docker/
-├── Dockerfile                   # 完整推理的GPU环境
-├── compose.yaml                 # parking使用GPU；compare只需CPU
-├── README.md
-├── scripts/
-│   ├── 01_build_18.sh           # 重新检测、OCR、定位和建图
-│   └── 02_compare_full_map.sh   # 读取预存全场景图，独立比较
-├── code/
-│   ├── fresh_build.py          # 入口1流程编排
-│   ├── perception.py           # SAM3、整帧和柱子OCR
-│   ├── refine.py               # 同帧几何定位及候选清理
-│   ├── prepare_color_inputs.py # 本次柱色测量
-│   ├── color_topology.py
-│   ├── map_pipeline.py
-│   ├── delivery_runner.py
-│   ├── check_scope_consistency.py
-│   ├── final_delivery_check.py
-│   ├── requirements-gpu.txt
-│   └── vendor/                 # 固定SAM3安装包
-├── data/
-│   ├── dataset/
-│   │   ├── rgb/               # 6,723张固定原始RGB
-│   │   ├── config.json
-│   │   ├── trajectories/      # T01...T18清单
-│   │   └── ...                # 历史检测归档
-│   ├── models/
-│   │   ├── sam3.pt
-│   │   ├── bpe_simple_vocab_16e6.txt.gz
-│   │   ├── manifest.json
-│   │   └── ocr/               # craft_mlt_25k.pth、zh_sim_g2.pth
-│   └── full_map/
-│       ├── points.npy         # 同范围LiDAR合并基线
-│       ├── scope_evidence/    # 逐帧几何和扫描来源记录
-│       ├── graph.sqlite       # 预先保存的封存图
-│       └── graph.json         # 封存图字典；另有audit/和frozen_manifest.json
-└── results/
-    ├── online_full_map/         # 入口1本轮合并图和summary
-    ├── runs/运行编号/
-    │   ├── input_config.json
-    │   ├── execution.json
-    │   ├── perception/        # 本次原始检测、OCR、掩膜、耗时
-    │   ├── refined/           # 本次几何定位和清理
-    │   ├── colored/           # 本次柱色识别和配置
-    │   ├── map/               # 本次原始图输出及审核记录
-    │   └── *.py.log           # 各阶段运行日志
-    ├── execution.json         # 最近一次完整运行尝试的状态与证据
-    ├── detections.jsonl       # 本次用于建图的检测
-    ├── run_config.json
-    ├── data_integrity.json
-    ├── report.json
-    ├── trajectories/T01...T18/
-    │   ├── summary.json
-    │   ├── graph.json
-    │   ├── graph.sqlite
-    │   ├── all_steps.jsonl
-    │   ├── updates.jsonl
-    │   ├── query_log.jsonl
-    │   └── frames/            # 帧号.jpg + 帧号.json框与ID对应表
-    ├── storage_comparison.json
-    ├── storage_comparison.csv
-    ├── storage_report.json
-    ├── scope_consistency.json
-    ├── scope_consistency.png
-    ├── online_automated_check.json      # 入口1独立检查
-    ├── frozen_map_automated_check.json  # 入口2独立检查
-    ├── final_automated_check.json       # 交付包综合复核
-    ├── fresh_process_queries.json
-    ├── scene_review/
-    ├── 范围对照图说明.txt
-    └── 指标1.2文档核对.txt
+### 1.1 安装 Docker
+
+已有 Docker 的机器先检查：
+
+```bash
+docker version
+docker compose version
 ```
 
-## 4. 安装Docker及NVIDIA运行环境
-
-已有Docker时无需重复安装。Ubuntu服务器按[Docker官方安装说明](https://docs.docker.com/engine/install/ubuntu/)配置官方软件源并安装Engine、Buildx与Compose：
+Ubuntu 首次安装命令如下，来源见 [Docker 安装说明](https://docs.docker.com/engine/install/ubuntu/)：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl
+sudo apt-get install -y ca-certificates curl git gh
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
@@ -125,7 +59,19 @@ sudo systemctl enable --now docker
 sudo docker run --rm hello-world
 ```
 
-再按[NVIDIA官方Container Toolkit说明](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)安装GPU容器支持：
+后续示例使用 `docker`。如果当前账号没有 Docker 权限，在 Docker 命令前加 `sudo`。
+
+### 1.2 配置 GPU 容器支持（运行建图时需要）
+
+先检查主机显卡：
+
+```bash
+nvidia-smi
+```
+
+确认显卡正常显示、驱动支持 CUDA 13.0。535 系列驱动需先升级到兼容版本。
+
+按 [NVIDIA Container Toolkit 安装说明](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)安装：
 
 ```bash
 sudo apt-get install -y curl gnupg2
@@ -135,118 +81,257 @@ sudo apt-get update
 sudo apt-get install -y nvidia-container-toolkit
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
-nvidia-smi
 ```
 
-主机显卡驱动和容器工具包分别安装。
+## 2. 获取代码和数据
 
-后续命令默认当前账号有 Docker 使用权限；如提示无权访问 Docker socket，请在 Docker 命令前加 `sudo`，或由管理员配置账号权限。
+有完整交付文件夹时，直接进入该文件夹，对照第 3 节检查文件，再执行第 4 节。通过 GitHub 获取时，按下面步骤下载。
 
-## 5. 准备数据、模型并构建镜像
+### 2.1 下载代码
 
-代码仓库是私有仓库，先使用有权限的GitHub账号登录。固定数据沿用`sealed-18-v1`中的108个64 MiB分卷；`fresh-18-v2`提供模型、完整推理代码和新结果。下载后先按各附件随附的SHA256清单核验，再解压到仓库根目录，避免多套一层文件夹。
+使用已获得私有仓库访问权限的 GitHub 账号：
 
 ```bash
+gh auth login
 gh repo clone ywang088/parking-indicator-1-2
 cd parking-indicator-1-2
-mkdir -p release_assets
+mkdir -p release_assets results
+```
+
+已有 Docker、但尚未安装下载工具的 Ubuntu 主机，可先执行 `sudo apt-get install -y git gh`。
+
+### 2.2 下载固定数据（两个脚本都需要）
+
+固定数据包含 6,723 张 RGB、18 条轨迹清单、370 个关键帧对应的几何数据、点云和预存图。下载 108 个数据分卷并解压：
+
+```bash
 gh release download sealed-18-v1 --repo ywang088/parking-indicator-1-2 --pattern 'parking-data.tar.gz.part*' --dir release_assets
 gh release download sealed-18-v1 --repo ywang088/parking-indicator-1-2 --pattern SHA256SUMS --output release_assets/data-SHA256SUMS
 (cd release_assets && sha256sum -c data-SHA256SUMS --ignore-missing)
 cat release_assets/parking-data.tar.gz.part* | tar -xzf -
-gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern 'parking-models.tar.gz.part*' --pattern SHA256SUMS --pattern release_manifest.json --pattern parking-frozen-map-metadata.tar.gz --dir release_assets
+```
+
+再下载封存图的配置和校验文件：
+
+```bash
+gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern parking-frozen-map-metadata.tar.gz --pattern SHA256SUMS --pattern release_manifest.json --dir release_assets
+(cd release_assets && sha256sum -c SHA256SUMS --ignore-missing)
+tar -xzf release_assets/parking-frozen-map-metadata.tar.gz
+```
+
+### 2.3 下载模型（运行建图时需要）
+
+下载 50 个模型分卷，包含 SAM3、BPE 和两份 OCR 权重：
+
+```bash
+gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern 'parking-models.tar.gz.part*' --dir release_assets
 (cd release_assets && sha256sum -c SHA256SUMS --ignore-missing)
 cat release_assets/parking-models.tar.gz.part* | tar -xzf -
-tar -xzf release_assets/parking-frozen-map-metadata.tar.gz
-docker compose build
 ```
 
-也可直接把已有模型放到`data/models/`。模型必须与本项目相匹配；本地原SAM3权重SHA256为`9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e`。完整本地交付文件夹已经放入原SAM3、BPE及两份OCR权重。
+已有模型时，将文件放入第 3 节列出的 `data/models/` 路径。SAM3 权重 SHA256：
 
-首次构建需要联网下载Python/CUDA依赖，数据和权重不打进镜像，作为data卷挂载。镜像和权重齐全后可断网执行。
-
-如只想先查看本次已完成的实跑结果，可在上述固定数据解压后下载新结果包（只更新 results，不覆盖 data 中的封存全场景图）：
-
-```bash
-gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern parking-fresh-results.tar.gz --dir release_assets
-(cd release_assets && sha256sum -c SHA256SUMS --ignore-missing)
-tar -xzf release_assets/parking-fresh-results.tar.gz
+```text
+9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e
 ```
 
-## 6. 运行两个独立入口
+所有压缩包均在项目根目录解压，解压后应直接出现 `data/dataset/`、`data/full_map/` 和 `data/models/`。
+
+## 3. 检查文件夹结构
+
+```text
+parking-indicator-1-2/               # 完整交付文件夹也可命名为 parking_docker
+├── README.md
+├── Dockerfile
+├── compose.yaml
+├── scripts/
+│   ├── 01_build_18.sh              # 18条轨迹建图
+│   └── 02_compare_full_map.sh      # 预存全场景图比较
+├── code/                          # 实现代码、依赖清单、SAM3安装包
+├── data/
+│   ├── dataset/
+│   │   ├── rgb/                   # 原始RGB图片
+│   │   ├── config.json            # 轨迹、关键帧、位姿等配置
+│   │   └── trajectories/          # T01至T18清单
+│   ├── models/                    # 建图所需模型
+│   │   ├── sam3.pt
+│   │   ├── bpe_simple_vocab_16e6.txt.gz
+│   │   └── ocr/
+│   │       ├── craft_mlt_25k.pth
+│   │       └── zh_sim_g2.pth
+│   └── full_map/                  # 预存封存图及对应点云
+│       ├── graph.sqlite
+│       ├── graph.json
+│       ├── points.npy
+│       ├── graph_scope.json
+│       ├── pointcloud_scope.json
+│       ├── frozen_manifest.json
+│       ├── audit/                 # 封存配置及检测记录
+│       └── scope_evidence/        # 逐帧几何和扫描记录
+└── results/                       # 运行后生成的结果
+```
+
+## 4. 构建镜像并检查环境
+
+两个脚本使用同一个镜像，构建一次即可：
 
 ```bash
-# 检查容器中的GPU及驱动兼容性
-docker compose run --rm parking python3 -c "import torch; assert torch.cuda.is_available(); print(torch.__version__,torch.version.cuda,torch.cuda.get_device_name())"
+docker compose build parking
+```
 
-# 可选：两帧推理检查，输出到独立runs子目录
+运行建图前检查容器内 GPU：
+
+```bash
+docker compose run --rm parking python3 -c "import torch; assert torch.cuda.is_available(); print('PyTorch:', torch.__version__); print('CUDA:', torch.version.cuda); print('GPU:', torch.cuda.get_device_name())"
+```
+
+成功时会打印 PyTorch 版本、CUDA 版本和显卡名称。
+
+首次运行建图，建议先做两帧检查：
+
+```bash
 docker compose run --rm parking bash scripts/01_build_18.sh --smoke-frames 2
+```
 
-# 正式入口1：所有370个固定关键帧重新推理并建图
+终端出现 `GPU smoke run complete` 表示两帧推理完成，输出位于 `results/runs/运行编号/`。
+
+## 5. 运行脚本1：18条轨迹建图
+
+### 5.1 启动
+
+```bash
 docker compose run --rm parking bash scripts/01_build_18.sh
+```
 
-# 正式入口2：独立读取预存全场景图，比较存储并检查范围
+脚本校验原始数据，对 370 个关键帧运行 SAM3 和 OCR，完成物体三维定位、柱子颜色与区域字母绑定，再按轨迹时间顺序增量更新四层图。每条轨迹从空图开始，四层分别为帧、物体、门户、区域。三维定位使用数据包提供的同步几何、标定和位姿。
+
+H100 80 GB 的参考运行约 26 分钟。运行过程中，终端显示当前帧或处理阶段。
+
+### 5.2 查看输出
+
+```text
+results/
+├── trajectories/T01...T18/
+│   ├── summary.json              # 本条轨迹统计
+│   ├── graph.json                # 图字典：nodes、edges、metadata
+│   ├── graph.sqlite              # 可查询的图数据库
+│   ├── frames/
+│   │   ├── 帧号.jpg              # RGB检测框、类别和物体ID
+│   │   └── 帧号.json             # 检测框与图节点ID对应表
+│   ├── all_steps.jsonl           # 按时间顺序记录全部输入
+│   ├── updates.jsonl             # 图更新日志
+│   └── query_log.jsonl           # 查询记录
+├── online_full_map/              # 本轮18条轨迹的合并图和summary
+├── runs/运行编号/                 # 各阶段检测、掩膜、中间数据和日志
+├── execution.json               # 本轮执行信息和完成标记
+├── online_automated_check.json   # 建图输出检查
+└── report.json                  # 18条轨迹汇总
+```
+
+直接打开 JPG 即可查看带框图像。每条 `summary.json` 的格式示例：
+
+```json
+{
+  "summary": {
+    "frames": 21,
+    "objects": 855,
+    "regions": 2,
+    "portals": 1,
+    "unlocalized_objects": 523
+  }
+}
+```
+
+以上数字来自参考运行；`unlocalized_objects` 表示已识别但没有三维位置的物体数量。全部轨迹共输出 370 张检测图和 370 份对应 JSON。
+
+### 5.3 判断是否成功
+
+终端最后出现 `Fresh SAM3 + OCR + geometry + 18-track mapping completed`，同时：
+
+- `results/execution.json` 中 `completed` 为 `true`，`processed_frames` 为 `370`。
+- `results/online_automated_check.json` 中 `automated_checks_passed` 为 `true`。
+- `results/trajectories/` 下存在 T01 至 T18。
+
+重新运行会创建新的 `runs/运行编号/`，并更新轨迹导出和 `online_full_map/`。需要保留多轮导出时，先将当前 `results/` 归档。
+
+## 6. 运行脚本2：读取预存图进行比较
+
+### 6.1 启动
+
+```bash
 docker compose run --rm compare
 ```
 
-两个入口分别运行。入口1使用 GPU，将在线图、轨迹和中间结果写入 results。入口2使用 CPU，读取 data/full_map 并输出存储比较。每次建图分配独立运行编号，历史 runs 可归档保存。
+该命令在 CPU 上运行，直接读取 `data/full_map/` 中的封存图和点云，`results/` 为空时也可以启动。
 
-如无Compose，可直接运行：
+### 6.2 查看输出
+
+| 文件 | 内容 |
+|---|---|
+| `results/storage_comparison.json` | 基线字节数、认知图字节数、降低率 |
+| `results/storage_comparison.csv` | 纳入统计的文件、字节数和哈希 |
+| `results/storage_report.json` | 存储格式和统计说明 |
+| `results/scope_consistency.json` | 帧集合、坐标范围和几何一致性检查 |
+| `results/scope_consistency.png` | 预存图、点云和18条轨迹的范围对照图 |
+| `results/frozen_map_automated_check.json` | 封存输入与比较结果检查 |
+
+配套封存数据的预期存储结果：
+
+```json
+{
+  "baseline_bytes": 14653609,
+  "cognitive_bytes": 11044558,
+  "reduction_percent": 24.62909307870846
+}
+```
+
+统计对象为 NPY 点云及其范围文件，与 SQLite 图及其范围文件。范围对应固定 18 条轨迹的观测地图。
+
+### 6.3 判断是否成功
+
+终端出现 `Frozen-map comparison checks passed`，随后打印上述存储结果。同时：
+
+- `scope_consistency.json` 中 `scope_consistent` 为 `true`。
+- `frozen_map_automated_check.json` 中 `automated_checks_passed` 为 `true`。
+
+## 7. 常见问题
+
+| 现象 | 处理方法 |
+|---|---|
+| GitHub 返回404或无权限 | 使用获授权账号执行 `gh auth login`，确认能访问私有仓库 |
+| 提示文件已下载 | 已有文件可直接使用；重新下载时为 `gh release download` 添加 `--clobber` |
+| 提示缺少原图、配置或封存校验文件 | 检查第2节两个固定数据下载步骤和解压目录 |
+| `Model file missing` 或缺少OCR权重 | 按第3节目录放置模型文件 |
+| CUDA不可用或驱动版本不足 | 检查 `nvidia-smi`、CUDA 13.0驱动兼容性和NVIDIA Container Toolkit，再执行第4节GPU检查 |
+| Docker socket访问被拒绝 | 在Docker命令前加 `sudo`，或配置当前账号的Docker使用权限 |
+| 只得到两帧结果 | 去掉 `--smoke-frames 2`，使用第5节正式命令 |
+| 原图或封存图哈希不匹配 | 重新下载、校验并解压对应固定数据包 |
+| 显存、内存或磁盘不足 | 释放所需资源，或换用符合第1节配置的机器 |
+| 进程报错退出 | 查看终端最后的错误，以及 `results/runs/运行编号/*.py.log` |
+
+## 8. 其他运行方式
+
+### 直接使用 Docker 命令
+
+已构建镜像时，可以执行：
 
 ```bash
-docker build --platform linux/amd64 -t parking-indicator-1-2:fresh-gpu .
+# 脚本1：GPU建图
 docker run --rm --gpus all --shm-size=8g -v "$PWD/data:/workspace/data" -v "$PWD/results:/workspace/results" parking-indicator-1-2:fresh-gpu bash scripts/01_build_18.sh
+
+# 脚本2：CPU比较
 docker run --rm -v "$PWD/data:/workspace/data:ro" -v "$PWD/results:/workspace/results" parking-indicator-1-2:fresh-gpu bash scripts/02_compare_full_map.sh
 ```
 
-HPC禁止Docker时，在已安装同版本SAM3/CUDA依赖的环境中通过Slurm执行相同scripts入口，设置`PARKING_PYTHON`为该环境Python。HPC 和 Docker 的测试记录分别保存在 results/verification。
+### HPC已有Python环境
 
-## 7. 运行记录
-
-`results/execution.json`必须满足：
-
-```json
-{"pipeline_mode":"fresh_sam3","completed":true,"processed_frames":370,"reuses_detection_cache":false,"reuses_ocr_cache":false}
-```
-
-同时有新运行编号、GPU型号、模型SHA256及本次预测SHA256。`results/runs/运行编号/perception/detections.jsonl`记录每帧本次检测、OCR和耗时；同目录provenance记录环境和模型信息。入口1自己的 online_automated_check.json 会核对这份执行证据和预测哈希。入口2只验证独立封存图的 frozen_manifest.json，不使用在线建图记录。
-
-运行失败时，入口返回非零退出码；具体原因见对应阶段日志。
-
-## 8. 预期输出及测试判定
-
-结构固定为18条轨迹结果、370张关键帧检测框图及370份框-ID对应JSON。每条summary包括frames、objects、regions、portals和unlocalized_objects；graph为nodes字典、edges列表和metadata。框上显示本轨迹graph物体ID，旁边JSON保留原始RGB坐标的bbox和检测ID。
-
-入口1记录本轮检测的物体、区域和门户。入口2记录预存图与点云的固定文件大小。 data/full_map 已从 sealed-18-v1 原始数据附件逐字节恢复，其来源和所有输入哈希记录在 frozen_manifest.json。
-
-第二个脚本输出baseline_bytes、cognitive_bytes、reduction_percent和逐文件CSV，同时检查封存文件哈希、共同帧集合、对应关键帧原图哈希、位姿、空间边界、逐帧点云重建一致性和独立进程加载查询。入口1另行检查18条轨迹的图边端点、输入日志顺序、框ID对应关系和全部原图哈希。封存图的存储检查要求实际降低率≥20%，检查结果写入 frozen_map_automated_check.json。
-
-直接打开`scope_consistency.png`和`trajectories/T01/frames/*.jpg`即可看结果，无需HTML。`scene_review`保留固定出口标识、路口、疑似电梯的原图，相关检测记录来自本次在线图。scope_consistency.png 对应预存全场景图，与入口1输出目录分开。
+使用包含上述版本依赖的 Python 环境，设置解释器路径后执行相同入口：
 
 ```bash
-# 查询当前结果里的物体；把示例ID替换为本次graph中的实际ID
-docker compose run --rm parking python3 code/map_pipeline.py query --db results/trajectories/T01/graph.sqlite --object-id object:004165:014
+export PARKING_PYTHON=/实际环境路径/bin/python
+bash scripts/01_build_18.sh
+# 或独立运行比较
+bash scripts/02_compare_full_map.sh
 ```
 
-## 9. 常见问题
-
-- CUDA不可用：确认在NVIDIA Linux主机、驱动兼容CUDA 13.0、Container Toolkit正确安装且gpus配置生效。
-- 找不到权重：检查data/models及OCR两份pth文件。
-- 原图SHA256失败：数据缺失或被改动，重新校验固定附件。
-- 只有两帧输出：执行的是`--smoke-frames 2`；正式运行请去掉该参数。
-- 在线结果与历史不同：新检测和OCR可能改变在线图；第二个脚本仍读取固定的封存图。
-- 封存图哈希失败：检查是否修改了 data/full_map。从固定数据附件恢复对应文件。
-- 峰值显存或CPU内存不足：使用空闲且显存更大的GPU，增加主机内存，保留失败日志。
-- HPC登录失败且解析成198.18.x.x：可能是代理Fake-IP接管；检查校园网DNS和路由后再直连。
-
-## 10. 本版验证记录（2026-11-24）
-
-- HPC H100 80GB，作业 877727，COMPLETED，退出码 0:0，用时 26 分 21 秒；370 个关键帧重新运行 SAM3 和 OCR，未使用旧检测和 OCR 缓存。
-- 新在线合并图：10,943 个物体、3 个区域、8 个候选门户；T01：21 帧、855 个物体、2 个区域、1 个候选门户。18 条轨迹均形成区域，370 张检测图附带 ID 和同名 JSON。
-- 上述 GPU 运行完成后，按独立入口要求拆分输出位置：在线图移入 results/online_full_map；data/full_map 从原始封存附件恢复。重新导出和检查不改变本轮推理结果。
-- 第二个入口读取预存图：基线 14,653,609 字节，认知图运行文件 11,044,558 字节，降低 24.629093%。
-- 测试范围：HPC 原生环境完成 GPU 推理；Linux amd64 Docker 完成镜像构建、模型导入、35 项自动测试和入口2运行。
-- 额外验证：在没有在线输出的空 results 目录中，以只读方式挂载 data，单独运行入口2；验证记录随包提供。
-- 本轮 GPU 峰值已分配显存约 4.71 GiB。
-
-详见 results/fresh_run_verification.json、online_automated_check.json、frozen_map_automated_check.json、final_automated_check.json 和 verification/。
+HPC 建图需在 GPU 作业中运行；Slurm 模板位于 `code/fresh_hpc.sbatch`，按所在集群填写项目路径、环境路径、分区和账号。文件夹布局与 Docker 方式一致。
