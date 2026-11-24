@@ -6,8 +6,8 @@ RUN pip install --no-cache-dir torch==2.12.0 torchvision==0.27.0 --index-url htt
 COPY code/requirements-gpu.txt /tmp/requirements.txt
 COPY code/vendor/sam3-0.1.4-py3-none-any.whl /tmp/sam3.whl
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && mv /tmp/sam3.whl /tmp/sam3-0.1.4-py3-none-any.whl && pip install --no-cache-dir /tmp/sam3-0.1.4-py3-none-any.whl
-COPY data/models/ /opt/parking/models/
-ENV SAM3_CHECKPOINT=/opt/parking/models/sam3.pt SAM3_BPE=/opt/parking/models/bpe_simple_vocab_16e6.txt.gz EASYOCR_MODEL_DIR=/opt/parking/models/ocr
+COPY data/models/ /opt/indicator/models/
+ENV SAM3_CHECKPOINT=/opt/indicator/models/sam3.pt SAM3_BPE=/opt/indicator/models/bpe_simple_vocab_16e6.txt.gz EASYOCR_MODEL_DIR=/opt/indicator/models/ocr
 COPY code/ /workspace/code/
 COPY scripts/ /workspace/scripts/
 CMD ["bash", "scripts/01_build_18.sh"]

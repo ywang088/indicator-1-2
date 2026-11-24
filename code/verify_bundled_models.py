@@ -2,7 +2,7 @@
 import os,json,hashlib
 from pathlib import Path
 def main():
- root=Path('/opt/parking/models');expected=json.loads((root/'manifest.json').read_text());verified={}
+ root=Path('/opt/indicator/models');expected=json.loads((root/'manifest.json').read_text());verified={}
  for key,name in {'SAM3_CHECKPOINT':'sam3.pt','SAM3_BPE':'bpe_simple_vocab_16e6.txt.gz','EASYOCR_MODEL_DIR':'ocr'}.items():
   if Path(os.environ[key]).resolve()!=root/name:raise ValueError('Unexpected model path: '+key)
  for name,digest in expected.items():

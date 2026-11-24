@@ -1,4 +1,4 @@
-# 停车场指标 1.2 运行指南
+# 指标 1.2测试 运行方法
 
 本项目提供两个独立脚本：
 
@@ -40,7 +40,7 @@ Ubuntu 首次安装命令如下，来源见 [Docker 安装说明](https://docs.d
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl git gh
+sudo apt-get install -y ca-certificates curl git python3
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
@@ -89,55 +89,47 @@ sudo systemctl restart docker
 
 ### 2.1 下载代码
 
-使用已获得私有仓库访问权限的 GitHub 账号：
+仓库公开可访问，使用 Git 直接下载：
 
 ```bash
-gh auth login
-gh repo clone ywang088/parking-indicator-1-2
-cd parking-indicator-1-2
+git clone https://github.com/ywang088/indicator-1-2.git
+cd indicator-1-2
 mkdir -p release_assets results
 ```
 
-已有 Docker、但尚未安装下载工具的 Ubuntu 主机，可先执行 `sudo apt-get install -y git gh`。
+已有 Docker 的 Ubuntu 主机，可执行 `sudo apt-get install -y git python3` 准备下载工具。后续下载脚本使用 Python 标准库，支持匿名下载与 SHA256 校验。
 
 ### 2.2 下载固定数据（两个脚本都需要）
 
 固定数据包含 6,723 张 RGB、18 条轨迹清单、370 个关键帧对应的几何数据、点云和预存图。下载 108 个数据分卷并解压：
 
 ```bash
-gh release download sealed-18-v1 --repo ywang088/parking-indicator-1-2 --pattern 'parking-data.tar.gz.part*' --dir release_assets
-gh release download sealed-18-v1 --repo ywang088/parking-indicator-1-2 --pattern SHA256SUMS --output release_assets/data-SHA256SUMS
+python3 code/download_assets.py data
 (cd release_assets && sha256sum -c data-SHA256SUMS --ignore-missing)
-cat release_assets/parking-data.tar.gz.part* | tar -xzf -
+cat release_assets/data.tar.gz.part* | tar -xzf -
+tar -xzf release_assets/frozen-map-metadata.tar.gz
 ```
 
-再下载封存图的配置和校验文件：
-
-```bash
-gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern parking-frozen-map-metadata.tar.gz --pattern SHA256SUMS --pattern release_manifest.json --dir release_assets
-(cd release_assets && sha256sum -c SHA256SUMS --ignore-missing)
-tar -xzf release_assets/parking-frozen-map-metadata.tar.gz
-```
+下载脚本同时获取封存图的配置和校验文件，已完成且校验通过的分卷会自动跳过。
 
 ### 2.3 下载内含模型的 Docker 镜像
 
 接手运行者下载完整镜像即可，SAM3 和 OCR 权重已包含在镜像内。
 
 ```bash
-mkdir -p image_assets
-gh release download docker-bundled-v1 --repo ywang088/parking-indicator-1-2 --pattern 'parking-gpu-with-models.tar.gz.part*' --pattern SHA256SUMS --pattern image_manifest.json --dir image_assets
+python3 code/download_assets.py image
 (cd image_assets && sha256sum -c SHA256SUMS)
-cat image_assets/parking-gpu-with-models.tar.gz.part* | gzip -dc | docker load
+cat image_assets/gpu-with-models.tar.gz.part* | gzip -dc | docker load
 ```
 
-成功后显示 `Loaded image: parking-indicator-1-2:bundled-gpu`。模型位于镜像的 `/opt/parking/models/`，数据挂载在 `/workspace/data/`，运行结果写入 `/workspace/results/`。
+成功后显示 `Loaded image: indicator-1-2:bundled-gpu`。模型位于镜像的 `/opt/indicator/models/`，数据挂载在 `/workspace/data/`，运行结果写入 `/workspace/results/`。
 
 所有数据压缩包在项目根目录解压，解压后应直接出现 `data/dataset/` 和 `data/full_map/`。镜像分卷通过 `docker load` 加载。
 
 ## 3. 检查文件夹结构
 
 ```text
-parking-indicator-1-2/               # 完整交付文件夹也可命名为 parking_docker
+indicator-1-2/
 ├── README.md
 ├── Dockerfile
 ├── compose.yaml
@@ -173,7 +165,7 @@ parking-indicator-1-2/               # 完整交付文件夹也可命名为 park
 两个脚本使用同一个已加载镜像：
 
 ```bash
-docker image inspect parking-indicator-1-2:bundled-gpu --format '{{.Os}}/{{.Architecture}}'
+docker image inspect indicator-1-2:bundled-gpu --format '{{.Os}}/{{.Architecture}}'
 ```
 
 预期输出 `linux/amd64`。按第 2.3 节加载发布镜像后，可直接执行下面的命令。
@@ -181,7 +173,7 @@ docker image inspect parking-indicator-1-2:bundled-gpu --format '{{.Os}}/{{.Arch
 运行建图前检查容器内 GPU：
 
 ```bash
-docker compose run --rm parking python3 -c "import torch; assert torch.cuda.is_available(); print('PyTorch:', torch.__version__); print('CUDA:', torch.version.cuda); print('GPU:', torch.cuda.get_device_name())"
+docker compose run --rm mapping python3 -c "import torch; assert torch.cuda.is_available(); print('PyTorch:', torch.__version__); print('CUDA:', torch.version.cuda); print('GPU:', torch.cuda.get_device_name())"
 ```
 
 成功时会打印 PyTorch 版本、CUDA 版本和显卡名称。
@@ -189,7 +181,7 @@ docker compose run --rm parking python3 -c "import torch; assert torch.cuda.is_a
 首次运行建图，建议先做两帧检查：
 
 ```bash
-docker compose run --rm parking bash scripts/01_build_18.sh --smoke-frames 2
+docker compose run --rm mapping bash scripts/01_build_18.sh --smoke-frames 2
 ```
 
 终端出现 `GPU smoke run complete` 表示两帧推理完成，输出位于 `results/runs/运行编号/`。
@@ -199,7 +191,7 @@ docker compose run --rm parking bash scripts/01_build_18.sh --smoke-frames 2
 ### 5.1 启动
 
 ```bash
-docker compose run --rm parking bash scripts/01_build_18.sh
+docker compose run --rm mapping bash scripts/01_build_18.sh
 ```
 
 脚本校验原始数据，对 370 个关键帧运行 SAM3 和 OCR，完成物体三维定位、柱子颜色与区域字母绑定，再按轨迹时间顺序增量更新四层图。每条轨迹从空图开始，四层分别为帧、物体、门户、区域。三维定位使用数据包提供的同步几何、标定和位姿。
@@ -297,8 +289,8 @@ docker compose run --rm compare
 
 | 现象 | 处理方法 |
 |---|---|
-| GitHub 返回404或无权限 | 使用获授权账号执行 `gh auth login`，确认能访问私有仓库 |
-| 提示文件已下载 | 已有文件可直接使用；重新下载时为 `gh release download` 添加 `--clobber` |
+| 下载失败或连接中断 | 检查 GitHub 网络连接后重新执行下载命令；校验通过的完整文件会跳过 |
+| 提示 Verified existing | 对应文件已通过哈希校验，可继续下一步 |
 | 提示找不到bundled-gpu镜像 | 完成第2.3节镜像下载与加载 |
 | 提示缺少原图、配置或封存校验文件 | 检查第2节两个固定数据下载步骤和解压目录 |
 | `Model file missing` 或缺少OCR权重 | 加载第2.3节的bundled-gpu镜像；自行构建时检查data/models目录 |
@@ -317,10 +309,10 @@ docker compose run --rm compare
 
 ```bash
 # 脚本1：GPU建图
-docker run --rm --gpus all --shm-size=8g -v "$PWD/data:/workspace/data" -v "$PWD/results:/workspace/results" parking-indicator-1-2:bundled-gpu bash scripts/01_build_18.sh
+docker run --rm --gpus all --shm-size=8g -v "$PWD/data:/workspace/data" -v "$PWD/results:/workspace/results" indicator-1-2:bundled-gpu bash scripts/01_build_18.sh
 
 # 脚本2：CPU比较
-docker run --rm -v "$PWD/data:/workspace/data:ro" -v "$PWD/results:/workspace/results" parking-indicator-1-2:bundled-gpu bash scripts/02_compare_full_map.sh
+docker run --rm -v "$PWD/data:/workspace/data:ro" -v "$PWD/results:/workspace/results" indicator-1-2:bundled-gpu bash scripts/02_compare_full_map.sh
 ```
 
 ### 自行构建镜像（开发或修改代码时）
@@ -328,10 +320,10 @@ docker run --rm -v "$PWD/data:/workspace/data:ro" -v "$PWD/results:/workspace/re
 先按第 3 节目录准备本地 `data/models/`。可从原模型附件获取：
 
 ```bash
-gh release download fresh-18-v2 --repo ywang088/parking-indicator-1-2 --pattern 'parking-models.tar.gz.part*' --dir release_assets
+python3 code/download_assets.py models
 (cd release_assets && sha256sum -c SHA256SUMS --ignore-missing)
-cat release_assets/parking-models.tar.gz.part* | tar -xzf -
-docker compose build parking
+cat release_assets/models.tar.gz.part* | tar -xzf -
+docker compose build mapping
 ```
 
 Dockerfile 会将模型复制到镜像内。首次自行构建需要联网安装依赖。
@@ -339,9 +331,9 @@ Dockerfile 会将模型复制到镜像内。首次自行构建需要联网安装
 如需把自行构建的镜像交给其他机器：
 
 ```bash
-docker save parking-indicator-1-2:bundled-gpu | gzip > parking-gpu-with-models.tar.gz
+docker save indicator-1-2:bundled-gpu | gzip > gpu-with-models.tar.gz
 # 在接收机器上加载
-gzip -dc parking-gpu-with-models.tar.gz | docker load
+gzip -dc gpu-with-models.tar.gz | docker load
 ```
 
 ### HPC已有Python环境
@@ -349,7 +341,7 @@ gzip -dc parking-gpu-with-models.tar.gz | docker load
 使用包含上述版本依赖的 Python 环境，设置解释器路径后执行相同入口：
 
 ```bash
-export PARKING_PYTHON=/实际环境路径/bin/python
+export INDICATOR_PYTHON=/实际环境路径/bin/python
 bash scripts/01_build_18.sh
 # 或独立运行比较
 bash scripts/02_compare_full_map.sh
