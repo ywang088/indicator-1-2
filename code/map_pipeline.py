@@ -250,7 +250,7 @@ def main():
  # Predictions provenance is necessary to distinguish real SAM inference from fixtures.
  prov_path=a.predictions.parent/'provenance.json';prov=json.loads(prov_path.read_text()) if prov_path.exists() else {}
  if not prov.get('completed') or prov.get('config_sha256')!=sha(a.config) or not prov.get('checkpoint_sha256'):reasons.append('missing completed SAM3 provenance bound to config')
- result=dict(summary=summary,baseline=pc,cognitive=gm,baseline_bytes=pbytes,cognitive_bytes=gbytes,reduction_percent=reduction,baseline_load=json.loads(check.stdout),counting_note='Runtime graph queries return frame IDs, timestamps, hashes, boxes, text, positions and adjacency without loading source RGB, masks or baseline. Audit gallery and independent replay replicas are not runtime dependencies; model weights are common processing tools, not scene map files. If an application requires images/masks as runtime data, include their files before claiming acceptance.')
+ result=dict(summary=summary,baseline=pc,cognitive=gm,baseline_bytes=pbytes,cognitive_bytes=gbytes,reduction_percent=reduction,baseline_load=json.loads(check.stdout),counting_note='Storage comparison counts the SQLite graph and scope file against the NPY point cloud and scope file. The graph stores frame IDs, timestamps, hashes, boxes, text, positions and adjacency.')
  dump(out/'report.json',result)
  from viewer import render
  render(c,rows,out,a.predictions.parent)

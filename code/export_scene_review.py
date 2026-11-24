@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def main():
  out=ROOT/'results/scene_review';out.mkdir(parents=True,exist_ok=True);records=[]
- samples=[('T02','000299','出口导向牌，不能据此确认实际出场口。'),('T06','001753','通道交汇位置，可作路口抽查。'),('T17','008976','画面含墙面门，原图不足以确认电梯；本次检测见相关记录。'),('T17','009016','车辆横向汇入主通道，可作通道汇合抽查。')]
+ samples=[('T02','000299','出口导向牌抽查帧。'),('T06','001753','通道交汇位置，可作路口抽查。'),('T17','008976','墙面门场景，作为电梯候选抽查帧；检测见对应记录。'),('T17','009016','车辆横向汇入主通道，可作通道汇合抽查。')]
  for tid,fid,note in samples:
   shutil.copy2(ROOT/'data/dataset/rgb'/f'{fid}.png',out/f'{fid}.png');db=sqlite3.connect(ROOT/'results/trajectories'/tid/'graph.sqlite');found=[]
   for oid,attrs in db.execute("select target,attributes from edges where source=? and kind='observes'",('frame:'+fid,)):
