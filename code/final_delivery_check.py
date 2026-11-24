@@ -4,11 +4,17 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def main():
  r=ROOT/'results';c=json.loads((r/'run_config.json').read_text());checks={};queries=[]
+ required=['report.json','run_config.json','data_integrity.json','storage_comparison.json','storage_comparison.csv','storage_report.json','scope_consistency.json','scope_consistency.png','scene_review/scene_examples.json','范围对照图说明.txt','指标1.2文档核对.txt']
+ checks['required_outputs_present']=all((r/name).is_file() for name in required)
+ scope=json.loads((r/'scope_consistency.json').read_text());checks['scope_checks_passed']=scope['scope_consistent']
+ checks['requested_scope_fields_removed']=not ({'coverage','limitations'} & set(scope))
  for t in c['trajectories']:
   folder=r/'trajectories'/t['id'];db=sqlite3.connect(folder/'graph.sqlite');ids={i for i, in db.execute('select id from nodes')};edges=db.execute('select source,target from edges').fetchall()
   checks[t['id']+'_references']=all(s in ids and v in ids for s,v in edges)
   checks[t['id']+'_frames']=set(i for i in ids if i.startswith('frame:'))=={'frame:'+i for i in t['frame_ids']}
-  steps=[json.loads(s) for s in (folder/'all_steps.jsonl').read_text().splitlines()];checks[t['id']+'_input_log_present']=len(steps)>0
+  steps=[json.loads(s) for s in (folder/'all_steps.jsonl').read_text().splitlines()];checks[t['id']+'_input_log_complete']=len(steps)==sum(t['source_start']<=int(f['id'])<=t['source_end'] for f in c['replay_inputs'])
+  checks[t['id']+'_input_log_order']=all(a['timestamp']<=b['timestamp'] for a,b in zip(steps,steps[1:]))
+  checks[t['id']+'_result_files']=all((folder/n).is_file() for n in ['summary.json','graph.json','graph.sqlite','updates.jsonl','query_log.jsonl'])
   for fid in t['frame_ids']:
    f=folder/'frames'/f'{fid}.json';v=json.loads(f.read_text());assert (f.with_suffix('.jpg')).exists();assert all(x['object_id'] in ids for x in v['detections'])
   db.close()
