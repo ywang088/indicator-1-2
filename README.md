@@ -231,7 +231,7 @@ docker compose run --rm parking python3 code/final_delivery_check.py
 
 ## 10. 私有附件的恢复及归档
 
-数据附件按约1.9 GiB分卷，文件名按顺序为`parking-data.tar.gz.part000`等；结果附件为`parking-results.tar.gz`。它们需要与同一版本代码一起使用。下载到仓库根目录的`release_assets/`后：
+数据附件按最多64 MiB分卷，文件名按顺序为`parking-data.tar.gz.part0000`等；结果附件为`parking-results.tar.gz`。它们需要与同一版本代码一起使用。下载到仓库根目录的`release_assets/`后：
 
 ```bash
 # Linux校验；Mac可用 shasum -a 256 -c SHA256SUMS

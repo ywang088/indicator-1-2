@@ -8,9 +8,9 @@ class Parts:
   total=len(b)
   while b:
    if self.f is None:
-    p=self.out/f'parking-data.tar.gz.part{self.i:03d}';self.f=p.open('wb');self.paths.append(p);self.i+=1;self.size=0
-   n=min(len(b),1900*1024*1024-self.size);self.f.write(b[:n]);b=b[n:];self.size+=n
-   if self.size==1900*1024*1024:self.f.close();self.f=None
+    p=self.out/f'parking-data.tar.gz.part{self.i:04d}';self.f=p.open('wb');self.paths.append(p);self.i+=1;self.size=0
+   n=min(len(b),64*1024*1024-self.size);self.f.write(b[:n]);b=b[n:];self.size+=n
+   if self.size==64*1024*1024:self.f.close();self.f=None
   return total
  def flush(self):
   if self.f:self.f.flush()
