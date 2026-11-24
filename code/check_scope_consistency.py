@@ -6,9 +6,9 @@ ROOT=Path(__file__).resolve().parents[1]
 def read(p):return json.loads(p.read_text())
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def check(root=ROOT):
- data=root/'data/full_map';res=root/'results';c=read(res/'run_config.json');gs=read(data/'graph_scope.json');ps=read(data/'pointcloud_scope.json');lo,hi=np.array(c['bounds_xyz']);pts=np.load(data/'points.npy');checks={}
+ data=root/'data/full_map';res=root/'results';c=read(data/'audit/config.json');gs=read(data/'graph_scope.json');ps=read(data/'pointcloud_scope.json');lo,hi=np.array(c['bounds_xyz']);pts=np.load(data/'points.npy');checks={}
  for k in ['scene','bounds_xyz','trajectory_ids','frame_ids','config_sha256','predictions_sha256']:checks['scope_equal_'+k]=gs[k]==ps[k]
- checks['config_hash']=sha(res/'run_config.json')==gs['config_sha256'];checks['detections_hash']=sha(root/'data/dataset/detections.jsonl')==gs['predictions_sha256']
+ checks['config_hash']=sha(data/'audit/config.json')==gs['config_sha256'];checks['detections_hash']=sha(data/'audit/detections.jsonl')==gs['predictions_sha256']
  frames={f['id']:f for f in c['frames']};checks['frame_set']=set(frames)==set(gs['frame_ids']);checks['cloud_finite']=bool(np.isfinite(pts).all());checks['cloud_in_bounds']=bool(((pts>=lo)&(pts<=hi)).all())
  db=sqlite3.connect(data/'graph.sqlite');nodes=[(i,k,json.loads(a)) for i,k,a in db.execute('select * from nodes')];db.close();gn={a['frame_id']:a for _,k,a in nodes if k=='frame'}
  checks['graph_frame_set']=set(gn)==set(frames)

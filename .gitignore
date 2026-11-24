@@ -10,3 +10,5 @@ __pycache__/
 !/results/README.md
 
 /release_upload/
+
+/release_fresh_assets/

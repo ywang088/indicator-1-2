@@ -1,1 +1,1 @@
-运行两个scripts入口后此处生成18条轨迹结果、检测图、范围图、存储比较与复核报告。详见根目录README。
+入口1：trajectories/、online_full_map/、runs/、execution.json、online_automated_check.json，属于新识别及逐帧增量建图。入口2：storage_comparison.*、scope_consistency.*、frozen_map_automated_check.json，独立读取data/full_map中的预存图。两个入口不互相依赖。

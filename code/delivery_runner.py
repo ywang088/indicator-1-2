@@ -14,9 +14,10 @@ def normalize(src,dst):
  shutil.copy2(src,dst);db=sqlite3.connect(dst);nodes=db.execute('select * from nodes').fetchall();edges=db.execute('select * from edges').fetchall();db.execute('delete from edges');db.execute('delete from nodes')
  db.executemany('insert into nodes values(?,?,?)',[(clean(i),k,json.dumps(clean(json.loads(a)),ensure_ascii=False,separators=(',',':'))) for i,k,a in nodes]);db.executemany('insert into edges values(?,?,?,?)',[(clean(s),clean(t),k,json.dumps(clean(json.loads(a)),ensure_ascii=False,separators=(',',':'))) for s,t,k,a in edges]);db.commit();db.execute('VACUUM');assert not db.execute('pragma foreign_key_check').fetchall();db.close()
 def export_run(run):
- c=json.loads((run/'audit/config.json').read_text());data=ROOT/'data/full_map';results=ROOT/'results';rows={r['frame_id']:r for r in map(json.loads,(run/'audit/detections.jsonl').read_text().splitlines())};fs={f['id']:f for f in c['frames']}
- normalize(run/'runtime/map.sqlite',data/'graph.sqlite');save(data/'graph.json',graph(data/'graph.sqlite'));shutil.copy2(run/'runtime/scope.json',data/'graph_scope.json');shutil.copy2(run/'baseline/points.npy',data/'points.npy');shutil.copy2(run/'baseline/scope.json',data/'pointcloud_scope.json')
+ c=json.loads((run/'audit/config.json').read_text());results=ROOT/'results';data=results/'online_full_map';data.mkdir(parents=True,exist_ok=True);rows={r['frame_id']:r for r in map(json.loads,(run/'audit/detections.jsonl').read_text().splitlines())};fs={f['id']:f for f in c['frames']}
+ normalize(run/'runtime/map.sqlite',data/'graph.sqlite');save(data/'graph.json',graph(data/'graph.sqlite'));shutil.copy2(run/'runtime/scope.json',data/'graph_scope.json');shutil.copy2(run/'baseline/scope.json',data/'pointcloud_scope.json')
  shutil.copy2(run/'audit/config.json',results/'run_config.json')
+ shutil.copy2(run/'audit/detections.jsonl',results/'detections.jsonl')
  from color_topology import make_topology
  summaries=[]
  for t in c['trajectories']:
@@ -37,13 +38,16 @@ def export_run(run):
      if fid in portal['evidence_frames']:edges.extend(dict(source=rid,target=portal['id'],kind='connects',attributes={}) for rid in portal['regions'])
     for e in edges:log.write(json.dumps(clean(dict(frame_id=fid,**e)),ensure_ascii=False)+'\n')
     from render_detection_frames import render_frame
-    render_frame(fs[fid]['image'],ds,observed,out/'frames'/f'{fid}.jpg',fid,t['id'])
+    render_frame(ROOT/'data/dataset/rgb'/f'{fid}.png',ds,observed,out/'frames'/f'{fid}.jpg',fid,t['id'])
   db.close()
+ save(data/'summary.json',json.loads((run/'report.json').read_text())['summary'])
  from export_scene_review import main as export_examples
  export_examples()
  save(results/'report.json',{'trajectories':summaries});print(json.dumps(summaries,ensure_ascii=False))
 def compare():
  data=ROOT/'data/full_map';r=ROOT/'results';r.mkdir(exist_ok=True);files=[]
+ from final_delivery_check import verify_frozen_inputs
+ verify_frozen_inputs()
  import numpy as np
  points=np.load(data/'points.npy',mmap_mode='r',allow_pickle=False);assert points.ndim==2 and points.shape[1]==3 and len(points)>0
  db=sqlite3.connect('file:'+str(data/'graph.sqlite')+'?mode=ro',uri=True);assert db.execute('pragma integrity_check').fetchone()[0]=='ok';assert not db.execute('pragma foreign_key_check').fetchall();db.close()
@@ -53,12 +57,12 @@ def compare():
  baseline=sum(x['bytes'] for x in files if x['side']=='baseline');cognitive=sum(x['bytes'] for x in files if x['side']=='cognitive');v=dict(baseline_bytes=baseline,cognitive_bytes=cognitive,reduction_percent=100*(baseline-cognitive)/baseline)
  save(r/'storage_comparison.json',v)
  with (r/'storage_comparison.csv').open('w') as f:w=csv.DictWriter(f,fieldnames=['side','file','bytes','sha256']);w.writeheader();w.writerows(files)
- save(r/'storage_report.json',dict(**v,runtime_format='SQLite',graph_json='Dictionary export of the same graph, not an additional runtime dependency',dictionary_export_bytes=(data/'graph.json').stat().st_size))
+ save(r/'storage_report.json',dict(**v,input_mode='pre_saved_frozen_full_map',input_graph='data/full_map/graph.sqlite',runtime_format='SQLite',graph_json='Dictionary export of the same graph, not an additional runtime dependency',dictionary_export_bytes=(data/'graph.json').stat().st_size))
  from check_scope_consistency import check
  check(ROOT)
  for note in (ROOT/'code/result_notes').glob('*.txt'):shutil.copy2(note,r/note.name)
- from final_delivery_check import main as validate
- validate()
+ from final_delivery_check import validate_frozen
+ validate_frozen()
  print(json.dumps(v,ensure_ascii=False))
 def main():
  p=argparse.ArgumentParser();p.add_argument('command',choices=['build','compare','export']);p.add_argument('--source',type=Path);a=p.parse_args()

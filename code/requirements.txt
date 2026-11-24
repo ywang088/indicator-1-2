@@ -1,10 +1,3 @@
-# Geometry, graph construction, tests and viewer. Use existing GPU torch environment.
-numpy>=1.26,<2.4
-scipy>=1.11
-Pillow>=10
-# Native SAM3 version previously validated on this user's HPC:
-sam3==0.1.4
-# CPU OCR companion. Download/prepare OCR weights before offline cluster execution.
-easyocr==1.7.2
-
-matplotlib
+# Default environment for fresh SAM3 inference. Install CUDA torch as in Dockerfile first.
+-r requirements-gpu.txt
+code/vendor/sam3-0.1.4-py3-none-any.whl

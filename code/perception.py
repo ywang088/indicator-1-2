@@ -110,14 +110,15 @@ def attach_text(d,ocr):
  return rows
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--config',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--device',default='cuda');p.add_argument('--ocr',choices=['easyocr','json'],default='easyocr');p.add_argument('--ocr-json');p.add_argument('--checkpoint');p.add_argument('--bpe');p.add_argument('--limit',type=int);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--config',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--device',default='cuda');p.add_argument('--ocr',choices=['easyocr','json'],default='easyocr');p.add_argument('--ocr-json');p.add_argument('--checkpoint');p.add_argument('--bpe');p.add_argument('--limit',type=int);p.add_argument('--geometry',type=Path);a=p.parse_args()
  c=json.loads(a.config.read_text());c['checkpoint']=a.checkpoint or c['checkpoint'];c['bpe']=a.bpe or c['bpe']
  frames=c['frames'][:a.limit] if a.limit else c['frames']
  if any(not f['image'] or not Path(f['image']).is_file() for f in frames):raise ValueError('Missing frozen RGB inputs; run prepare with complete --rgb-root or explicit development config')
  for key in ['checkpoint','bpe']:
   if not Path(c[key]).is_file():raise FileNotFoundError(c[key])
  a.output.mkdir(parents=True,exist_ok=False);(a.output/'masks').mkdir();(a.output/'images').mkdir()
- xyz=pointmap(c);model=Sam(c,a.device);ocr=OCR(a.ocr,a.ocr_json,a.device)
+ geometry=np.load(a.geometry/'frame_points.npz') if a.geometry else None
+ xyz=None if geometry is not None else pointmap(c);model=Sam(c,a.device);ocr=OCR(a.ocr,a.ocr_json,a.device)
  import importlib.metadata
  provenance=dict(code_sha256={p.name:sha(p) for p in sorted(Path(__file__).parent.glob('*.py'))},config_sha256=sha(a.config),checkpoint_sha256=sha(c['checkpoint']),sam3_version=importlib.metadata.version('sam3'),python=sys.version,torch=importlib.metadata.version('torch'),numpy=np.__version__,pillow=importlib.metadata.version('Pillow'),threshold=c['min_confidence'],limit=a.limit,device=a.device,ocr=a.ocr,completed=False)
  dump(a.output/'provenance.json',provenance)
@@ -136,6 +137,7 @@ def main():
      crop=im.crop((x0,y0,x1,y1));factor=min(4.,1200/max(crop.size));crop=crop.resize((round(crop.width*factor),round(crop.height*factor)))
      for t in ocr(crop,f):
       b=t['bbox'];t['bbox']=[b[0]/factor+x0,b[1]/factor+y0,b[2]/factor+x0,b[3]/factor+y0];t['source']='enlarged_column_crop';texts.append(t)
+   if geometry is not None:xyz=geometry['f'+f['id']]
    proj=projection(xyz,f,c['K'],c['image_size']);vis=im.copy();draw=ImageDraw.Draw(vis)
    for i,d in enumerate(dets):
     d['id']=f'{f["id"]}:{i:03}';d['texts']=attach_text(d,texts);d['position'],d['geometry']=locate(d['mask'],proj,xyz)
@@ -144,5 +146,5 @@ def main():
    vis.thumbnail((960,540));vis.save(a.output/'images'/f'{f["id"]}.jpg',quality=88)
    row=dict(frame_id=f['id'],timestamp=f['timestamp'],image_sha256=f['image_sha256'],detections=dets,ocr=texts,seconds=time.monotonic()-started)
    log.write(json.dumps(row,ensure_ascii=False,allow_nan=False)+'\n');log.flush();print(f['id'],len(dets),round(row['seconds'],2),flush=True)
- provenance.update(completed=True,frames=len(frames));dump(a.output/'provenance.json',provenance)
+ provenance.update(completed=True,frames=len(frames),peak_gpu_allocated_bytes=model.torch.cuda.max_memory_allocated() if a.device.startswith('cuda') else None);dump(a.output/'provenance.json',provenance)
 if __name__=='__main__':main()
